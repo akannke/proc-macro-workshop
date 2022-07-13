@@ -66,7 +66,7 @@ fn build_builder_struct(
                 }
             } else {
                 quote! {
-                    #ident: Option<#ty>
+                    #ident: std::option::Option<#ty>
                 }
             }
         });
@@ -167,7 +167,7 @@ fn build_builder_impl(
                 } else {
                     quote! {
                         pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
-                            self.#ident = Some(#ident);
+                            self.#ident = std::option::Option::Some(#ident);
                             self
                         }
                     }
@@ -193,7 +193,7 @@ fn build_builder_impl(
         impl #builder_name {
             #(#setters)*
 
-            pub fn build(&mut self) -> Result<#struct_name, Box<dyn std::error::Error>> {
+            pub fn build(&mut self) -> std::result::Result<#struct_name, std::boxed::Box<dyn std::error::Error>> {
                 #(#checks)*
                 Ok(#struct_name {
                     #(#struct_fields),*
