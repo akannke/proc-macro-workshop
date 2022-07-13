@@ -5,6 +5,11 @@ use syn::{
     MetaNameValue, NestedMeta, PathArguments, PathSegment, Type, Visibility,
 };
 
+enum LitOrError {
+    Lit(String),
+    Error(syn::Error),
+}
+
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -16,9 +21,17 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let fields = match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Named(fields) => fields,
-            _ => panic!("no unnamed fields are allowed"),
+            _ => {
+                return syn::Error::new(ident.span(), "expects named fields")
+                    .to_compile_error()
+                    .into()
+            }
         },
-        _ => panic!("this macro can be applied only to struct"),
+        _ => {
+            return syn::Error::new(ident.span(), "expects struct")
+                .to_compile_error()
+                .into()
+        }
     };
 
     let builder_struct = build_builder_struct(&fields, &builder_name, &vis);
@@ -92,10 +105,21 @@ fn build_builder_impl(
             .map(|attr| match attr.parse_meta() {
                 Ok(Meta::List(list)) => match list.nested.first() {
                     Some(NestedMeta::Meta(Meta::NameValue(MetaNameValue {
-                        path: _,
+                        ref path,
                         eq_token: _,
                         lit: Lit::Str(ref str),
-                    }))) => Some(str.value()),
+                    }))) => {
+                        if let Some(name) = path.segments.first() {
+                            if name.ident.to_string() != "each" {
+                                return Some(LitOrError::Error(syn::Error::new_spanned(
+                                    list,
+                                    "expected `builder(each = \"...\")`",
+                                )));
+                            }
+                        }
+
+                        Some(LitOrError::Lit(str.value()))
+                    }
                     _ => None,
                 },
                 _ => None,
@@ -106,7 +130,7 @@ fn build_builder_impl(
         let ty = unwrap_option(&field.ty).unwrap_or(&field.ty);
         // #[builder(each = "name")]
         match ident_each_name {
-            Some(name) => {
+            Some(LitOrError::Lit(name)) => {
                 let ty_each = unwrap_vector(ty).unwrap();
                 let ident_each = Ident::new(name.as_str(), Span::call_site());
                 // if the name specified in "each" is the same as the field name
@@ -131,6 +155,7 @@ fn build_builder_impl(
                     }
                 }
             }
+            Some(LitOrError::Error(err)) => err.to_compile_error().into(),
             None => {
                 if is_vector(&ty) {
                     quote! {
